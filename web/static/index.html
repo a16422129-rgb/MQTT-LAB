@@ -1,0 +1,454 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Camera Operations | MQTT Lab</title>
+  <style>
+    :root {
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+      color: #e8edf5;
+      background: #10151e;
+      font-synthesis: none;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(ellipse at top left, #1d3044 0, transparent 42%),
+        #10151e;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 25px clamp(18px, 5vw, 64px);
+      border-bottom: 1px solid #293443;
+      background: #10151ecc;
+    }
+
+    .eyebrow {
+      color: #8ca5c4;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    h1 { margin: 7px 0 0; font-size: clamp(23px, 4vw, 34px); }
+    h2 { margin: 0; font-size: 19px; }
+    p { color: #9eacbf; line-height: 1.5; }
+
+    .connection {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      border: 1px solid #334052;
+      border-radius: 999px;
+      padding: 9px 13px;
+      color: #b9c7d9;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #e3a54f;
+    }
+
+    .dot.connected { background: #47d7a0; }
+    .dot.disconnected { background: #ff6b75; }
+
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 30px clamp(18px, 5vw, 64px);
+    }
+
+    .intro {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 20px;
+      margin-bottom: 22px;
+    }
+
+    .intro p { margin-bottom: 0; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      background: #19222e;
+      border: 1px solid #303d4e;
+      border-radius: 17px;
+      padding: 22px;
+      box-shadow: 0 12px 32px #00000020;
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .camera-name {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .camera-icon {
+      width: 43px;
+      height: 43px;
+      display: grid;
+      place-items: center;
+      background: #26394b;
+      border-radius: 12px;
+      font-size: 22px;
+    }
+
+    .muted { color: #94a5ba; font-size: 13px; }
+
+    .status {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .7px;
+      text-transform: uppercase;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: #3b414a;
+      color: #cbd4df;
+    }
+
+    .status.online { background: #153f36; color: #6be5b5; }
+    .status.offline { background: #48282f; color: #ff9da5; }
+    .status.stale { background: #4a3920; color: #ffd17e; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 11px;
+    }
+
+    .metric {
+      padding: 15px;
+      border-radius: 12px;
+      background: #111923;
+      border: 1px solid #273241;
+    }
+
+    .metric-label { color: #91a1b5; font-size: 12px; }
+    .metric-value { font-size: 27px; font-weight: 700; margin-top: 8px; }
+    .unit { color: #9cacc0; font-size: 13px; font-weight: 500; }
+
+    .control {
+      margin-top: 20px;
+      border-top: 1px solid #303b49;
+      padding-top: 18px;
+    }
+
+    label { display: block; color: #b8c6d7; font-size: 13px; margin-bottom: 9px; }
+
+    .control-row { display: flex; gap: 9px; }
+
+    input {
+      width: 100%;
+      min-width: 0;
+      color: #f1f5fa;
+      background: #101720;
+      border: 1px solid #3b4a5d;
+      border-radius: 9px;
+      padding: 11px 12px;
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      border-radius: 9px;
+      padding: 11px 15px;
+      color: #081610;
+      background: #6be5b5;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    button:hover { background: #8bf0c8; }
+    button:disabled { opacity: .55; cursor: wait; }
+
+    .response {
+      min-height: 40px;
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: #121a24;
+      border-radius: 9px;
+      color: #a9b8ca;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .response.success { color: #77e6b8; }
+    .response.error { color: #ff9da5; }
+
+    .footer {
+      margin-top: 25px;
+      color: #8495aa;
+      font-size: 12px;
+      text-align: center;
+    }
+
+    @media (max-width: 580px) {
+      header { align-items: flex-start; flex-direction: column; }
+      .intro { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="eyebrow">MQTT Lab / Operations</div>
+      <h1>Camera monitoring</h1>
+    </div>
+    <div class="connection">
+      <span id="connectionDot" class="dot"></span>
+      <span id="connectionText">Connecting to backend…</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div>
+        <h2>Device overview</h2>
+        <p>Live telemetry and remote FPS controls.</p>
+      </div>
+      <div class="muted" id="lastUpdated">Waiting for camera data…</div>
+    </section>
+
+    <section id="cameraCards" class="cards" aria-live="polite"></section>
+
+    <div class="footer">
+      Dashboard → FastAPI → MQTT broker → camera simulators
+    </div>
+  </main>
+
+  <script>
+    const cards = document.getElementById("cameraCards");
+    const connectionDot = document.getElementById("connectionDot");
+    const connectionText = document.getElementById("connectionText");
+    const lastUpdated = document.getElementById("lastUpdated");
+
+    let socket;
+    let reconnectTimer;
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      })[char]);
+    }
+
+    function setBackendConnection(connected) {
+      connectionDot.className = "dot " + (connected ? "connected" : "disconnected");
+      connectionText.textContent = connected
+        ? "Backend connected"
+        : "Backend disconnected";
+    }
+
+    function formatValue(value, suffix = "") {
+      return value === null || value === undefined
+        ? "—"
+        : `${escapeHtml(value)}${suffix}`;
+    }
+
+    function renderCameras(cameras) {
+      const entries = Object.entries(cameras);
+
+      if (entries.length === 0) {
+        cards.innerHTML = '<div class="card"><p>No cameras discovered yet. Start a simulator.</p></div>';
+        return;
+      }
+      const activeElement = document.activeElement;
+      const activeInputId = activeElement?.id;
+      const activeInputValue = activeElement?.value;
+      cards.innerHTML = entries
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([id, camera]) => {
+          const status = camera.connection || "offline";
+          const statusClass = ["online", "offline", "stale"].includes(status)
+            ? status : "";
+          const response = camera.last_response;
+          let responseText = "No command response received yet.";
+          let responseClass = "";
+
+          if (response) {
+            responseText = `${response.success ? "Accepted" : "Rejected"}: ${response.message || "No details"}`;
+            responseClass = response.success ? "success" : "error";
+          }
+
+          return `
+            <article class="card">
+              <div class="card-head">
+                <div class="camera-name">
+                  <div class="camera-icon" aria-hidden="true">◉</div>
+                  <div>
+                    <h2>${escapeHtml(id)}</h2>
+                    <div class="muted">Camera simulator</div>
+                  </div>
+                </div>
+                <span class="status ${statusClass}">${escapeHtml(status.replaceAll("_", " "))}</span>
+              </div>
+
+              <div class="metrics">
+                <div class="metric">
+                  <div class="metric-label">Actual FPS</div>
+                  <div class="metric-value">${formatValue(camera.fps)} <span class="unit">fps</span></div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">Target FPS</div>
+                  <div class="metric-value">${formatValue(camera.target_fps)} <span class="unit">fps</span></div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">Temperature</div>
+                  <div class="metric-value">${formatValue(camera.temperature_c, "°")} <span class="unit">C</span></div>
+                </div>
+                <div class="metric">
+                  <div class="metric-label">Last telemetry</div>
+                  <div class="metric-value" style="font-size:16px">
+                    ${camera.last_seen ? escapeHtml(new Date(camera.last_seen).toLocaleTimeString()) : "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div class="control">
+                <label for="fps-${escapeHtml(id)}">Change target FPS (1–60)</label>
+                <form class="fps-form" data-camera="${escapeHtml(id)}">
+                  <div class="control-row">
+                    <input id="fps-${escapeHtml(id)}" name="fps" type="number"
+                      min="1" max="60" step="1" required
+                      value="${camera.target_fps ?? 30}">
+                    <button type="submit">Send command</button>
+                  </div>
+                </form>
+                <div class="response ${responseClass}" id="response-${escapeHtml(id)}">${escapeHtml(responseText)}</div>
+              </div>
+            </article>
+          `;
+        }).join("");
+        if (activeInputId && activeInputId.startsWith("fps-")) {
+            const replacement = document.getElementById(activeInputId);
+            if (replacement) {
+                replacement.value = activeInputValue;
+                replacement.focus();
+            }
+        }
+
+      lastUpdated.textContent = `Dashboard updated ${new Date().toLocaleTimeString()}`;
+    }
+
+    async function sendFPSCommand(deviceId, form) {
+      const input = form.elements.fps;
+      const button = form.querySelector("button");
+      const responseBox = document.getElementById(`response-${deviceId}`);
+      const fps = Number(input.value);
+
+      if (!Number.isInteger(fps) || fps < 1 || fps > 60) {
+        responseBox.className = "response error";
+        responseBox.textContent = "Enter a whole number from 1 to 60.";
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = "Sending…";
+      responseBox.className = "response";
+      responseBox.textContent = "Sending command to backend…";
+
+      try {
+        const response = await fetch(
+          `/api/cameras/${encodeURIComponent(deviceId)}/fps`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fps })
+          }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.detail || "Could not send command");
+        }
+
+        responseBox.className = "response success";
+        responseBox.textContent =
+          `Command published for ${deviceId}. Waiting for camera acknowledgement…`;
+      } catch (error) {
+        responseBox.className = "response error";
+        responseBox.textContent = error.message;
+      } finally {
+        button.disabled = false;
+        button.textContent = "Send command";
+      }
+    }
+
+    cards.addEventListener("submit", event => {
+      if (!event.target.matches(".fps-form")) return;
+      event.preventDefault();
+      sendFPSCommand(event.target.dataset.camera, event.target);
+    });
+
+    function connectWebSocket() {
+      clearTimeout(reconnectTimer);
+
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(`${protocol}//${location.host}/ws`);
+
+      socket.addEventListener("open", () => setBackendConnection(true));
+
+      socket.addEventListener("message", event => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === "camera_state") {
+            renderCameras(message.cameras);
+          }
+        } catch (error) {
+          console.error("Invalid dashboard update", error);
+        }
+      });
+
+      socket.addEventListener("close", () => {
+        setBackendConnection(false);
+        reconnectTimer = setTimeout(connectWebSocket, 2000);
+      });
+
+      socket.addEventListener("error", () => socket.close());
+    }
+
+    // Fetch an initial snapshot; WebSocket then keeps the dashboard live.
+    fetch("/api/cameras")
+      .then(response => response.json())
+      .then(result => renderCameras(result.cameras))
+      .catch(() => {});
+
+    connectWebSocket();
+  </script>
+</body>
+</html>
