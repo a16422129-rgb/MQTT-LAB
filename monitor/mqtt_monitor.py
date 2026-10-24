@@ -1,35 +1,47 @@
+
 import json
 
 import paho.mqtt.client as mqtt
 
 BROKER = "127.0.0.1"
 PORT = 1883
-TELEMETRY_TOPIC = "camera/+/telemetry"
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code.is_failure:
-        print("MQTT connection failed:", reason_code)
+        print("Connection failed:", reason_code)
         return
 
-    print("Connected to MQTT broker.")
-    client.subscribe(TELEMETRY_TOPIC, qos=0)
-    print("Subscribed to:", TELEMETRY_TOPIC)
-    print("Waiting for camera telemetry...\n")
+    client.subscribe("camera/+/telemetry", qos=0)
+    client.subscribe("camera/+/status", qos=1)
+
+    print("Connected to Mosquitto.")
+    print("Monitoring all camera devices...\n")
 
 
 def on_message(client, userdata, message):
     try:
-        telemetry = json.loads(message.payload.decode("utf-8"))
-        print(f"Topic: {message.topic}")
-        print(f"Device: {telemetry['device_id']}")
-        print(f"FPS: {telemetry['fps']}")
-        print(f"Temperature: {telemetry['temperature_c']} °C")
-        print(f"Status: {telemetry['status']}")
-        print("-" * 40)
+        data = json.loads(message.payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        print("Invalid JSON received on", message.topic)
+        return
 
-    except (UnicodeDecodeError, json.JSONDecodeError, KeyError) as error:
-        print("Could not process message:", error)
+    print(f"Topic: {message.topic}")
+
+    if message.topic.endswith("/telemetry"):
+        print(
+            f"  {data.get('device_id')} | "
+            f"FPS: {data.get('fps')} | "
+            f"Temperature: {data.get('temperature_c')} °C"
+        )
+    elif message.topic.endswith("/status"):
+        print(
+            f"  {data.get('device_id')} | "
+            f"Status: {data.get('status')} | "
+            f"Reason: {data.get('reason', 'reported')}"
+        )
+
+    print("-" * 45)
 
 
 client = mqtt.Client(
@@ -40,12 +52,12 @@ client = mqtt.Client(
 client.on_connect = on_connect
 client.on_message = on_message
 
-print("Starting MQTT monitor...")
+print("Starting camera monitor...")
 client.connect(BROKER, PORT, keepalive=60)
 
 try:
     client.loop_forever()
 except KeyboardInterrupt:
-    print("\nStopping monitor...")
+    print("\nMonitor stopped.")
 finally:
     client.disconnect()
