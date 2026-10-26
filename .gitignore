@@ -1,0 +1,4 @@
+.env
+security/passwordfile
+__pycache__/
+*.py[cod]

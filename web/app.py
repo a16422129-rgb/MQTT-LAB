@@ -1,6 +1,7 @@
 import sqlite3
 import asyncio
 import json
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -8,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -22,8 +24,10 @@ PORT = 1883
 TELEMETRY_TIMEOUT_SECONDS = 6
 
 BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BASE_DIR.parent
 STATIC_DIR = BASE_DIR / "static"
 DB_PATH = BASE_DIR / "camera_history.db"
+load_dotenv(PROJECT_DIR / ".env")
 db = None
 # Internal state is held in memory; no database is required for this lab.
 cameras = {
@@ -52,6 +56,18 @@ cameras = {
 websocket_clients: set[WebSocket] = set()
 event_loop = None
 mqtt_client = None
+
+
+def get_dashboard_credentials():
+    username = os.getenv("MQTT_DASHBOARD_USERNAME")
+    password = os.getenv("MQTT_DASHBOARD_PASSWORD")
+    if not username or not password:
+        raise RuntimeError(
+            "Missing dashboard MQTT credentials. Set MQTT_DASHBOARD_USERNAME and "
+            "MQTT_DASHBOARD_PASSWORD in the root .env file."
+        )
+
+    return username, password
 
 
 def utc_now():
@@ -253,6 +269,7 @@ async def lifespan(app: FastAPI):
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         client_id=f"camera-web-dashboard-{uuid.uuid4().hex[:8]}",
     )
+    mqtt_client.username_pw_set(*get_dashboard_credentials())
     mqtt_client.on_connect = on_mqtt_connect
     mqtt_client.on_message = on_mqtt_message
 

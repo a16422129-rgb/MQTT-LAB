@@ -1,0 +1,22 @@
+user camera01
+topic write camera/camera01/telemetry
+topic write camera/camera01/status
+topic write camera/camera01/response
+topic read camera/camera01/command
+
+user camera02
+topic write camera/camera02/telemetry
+topic write camera/camera02/status
+topic write camera/camera02/response
+topic read camera/camera02/command
+
+user dashboard
+topic read camera/+/telemetry
+topic read camera/+/status
+topic read camera/+/response
+topic write camera/+/command
+
+user monitor
+topic read camera/+/telemetry
+topic read camera/+/status
+topic read camera/+/response

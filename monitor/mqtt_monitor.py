@@ -1,10 +1,27 @@
 
 import json
+import os
+from pathlib import Path
 
 import paho.mqtt.client as mqtt
+from dotenv import load_dotenv
 
 BROKER = "127.0.0.1"
 PORT = 1883
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+
+def get_monitor_credentials():
+    username = os.getenv("MQTT_MONITOR_USERNAME")
+    password = os.getenv("MQTT_MONITOR_PASSWORD")
+    if not username or not password:
+        raise RuntimeError(
+            "Missing monitor MQTT credentials. Set MQTT_MONITOR_USERNAME and "
+            "MQTT_MONITOR_PASSWORD in the root .env file."
+        )
+
+    return username, password
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
@@ -60,6 +77,7 @@ client = mqtt.Client(
     callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
     client_id="camera-monitor",
 )
+client.username_pw_set(*get_monitor_credentials())
 
 client.on_connect = on_connect
 client.on_message = on_message
