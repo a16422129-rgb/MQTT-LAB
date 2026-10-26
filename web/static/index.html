@@ -217,6 +217,57 @@
       header { align-items: flex-start; flex-direction: column; }
       .intro { align-items: flex-start; flex-direction: column; }
     }
+    select:focus, input:focus, button:focus-visible {
+  outline: 2px solid #6be5b5;
+  outline-offset: 2px;
+}
+
+.chart-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 190px;
+}
+
+.chart-label {
+  fill: #9eacbf;
+  font-size: 11px;
+}
+
+.chart-grid {
+  stroke: #344151;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.chart-line {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.chart-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: #b9c7d9;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
   </style>
 </head>
 <body>
@@ -241,6 +292,49 @@
     </section>
 
     <section id="cameraCards" class="cards" aria-live="polite"></section>
+    
+<section class="card" style="margin-top:24px">
+  <div class="card-head">
+    <div>
+      <h2>Telemetry history</h2>
+      <div class="muted">Stored readings from SQLite</div>
+    </div>
+  </div>
+
+  <div class="control-row" style="margin-bottom:20px">
+    <select id="historyDevice" aria-label="Camera"
+      style="flex:1;min-width:0;background:#101720;color:#e8edf5;border:1px solid #3b4a5d;border-radius:9px;padding:11px">
+      <option value="camera01">camera01</option>
+      <option value="camera02">camera02</option>
+    </select>
+
+    <select id="historyMinutes" aria-label="Time range"
+      style="flex:1;min-width:0;background:#101720;color:#e8edf5;border:1px solid #3b4a5d;border-radius:9px;padding:11px">
+      <option value="15">Last 15 minutes</option>
+      <option value="60" selected>Last hour</option>
+      <option value="360">Last 6 hours</option>
+      <option value="1440">Last 24 hours</option>
+      <option value="10080">Last 7 days</option>
+    </select>
+
+    <button id="refreshHistory" type="button">Refresh charts</button>
+  </div>
+
+  <h2 style="margin:20px 0 8px">Actual and target FPS</h2>
+  <div id="fpsChart" style="width:100%;overflow:hidden">
+    <p>Waiting for history…</p>
+  </div>
+
+  <h2 style="margin:24px 0 8px">Temperature</h2>
+  <div id="temperatureChart" style="width:100%;overflow:hidden">
+    <p>Waiting for history…</p>
+  </div>
+
+  <div id="historySummary" class="muted" style="margin-top:15px">
+    No historical readings loaded yet.
+  </div>
+</section>
+
 
     <div class="footer">
       Dashboard → FastAPI → MQTT broker → camera simulators
@@ -414,6 +508,164 @@
       event.preventDefault();
       sendFPSCommand(event.target.dataset.camera, event.target);
     });
+    
+function drawLineChart(containerId, records, series) {
+  const container = document.getElementById(containerId);
+
+  if (!records.length) {
+    container.innerHTML =
+      '<p class="muted">No readings in this time range yet. Leave the simulator running, then refresh.</p>';
+    return;
+  }
+
+  const width = 760;
+  const height = 230;
+  const left = 55;
+  const right = 18;
+  const top = 18;
+  const bottom = 36;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+
+  const allValues = series.flatMap(item =>
+    item.values.filter(value =>
+      typeof value === "number" && Number.isFinite(value)
+    )
+  );
+
+  if (!allValues.length) {
+    container.innerHTML = '<p class="muted">No numeric readings available.</p>';
+    return;
+  }
+
+  let min = Math.min(...allValues);
+  let max = Math.max(...allValues);
+
+  if (min === max) {
+    min -= 1;
+    max += 1;
+  } else {
+    const padding = (max - min) * 0.12;
+    min -= padding;
+    max += padding;
+  }
+
+  const x = index => left +
+    (records.length === 1 ? 0.5 : index / (records.length - 1)) * plotWidth;
+
+  const y = value => top + ((max - value) / (max - min)) * plotHeight;
+
+  let svg = `<svg class="chart-svg" viewBox="0 0 ${width} ${height}"
+    role="img" aria-label="Historical telemetry line chart">`;
+
+  for (let i = 0; i <= 4; i++) {
+    const value = max - ((max - min) * i / 4);
+    const yy = y(value);
+
+    svg += `
+      <line class="chart-grid" x1="${left}" y1="${yy}"
+        x2="${width - right}" y2="${yy}"/>
+      <text class="chart-label" x="${left - 8}" y="${yy + 4}"
+        text-anchor="end">${value.toFixed(1)}</text>`;
+  }
+
+  for (const item of series) {
+    let points = [];
+
+    item.values.forEach((value, index) => {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        points.push(`${x(index)},${y(value)}`);
+      }
+    });
+
+    if (points.length) {
+      svg += `<polyline class="chart-line"
+        stroke="${item.color}" points="${points.join(" ")}"/>`;
+    }
+  }
+
+  const firstTime = new Date(records[0].timestamp).toLocaleTimeString();
+  const lastTime = new Date(records[records.length - 1].timestamp)
+    .toLocaleTimeString();
+
+  svg += `
+    <text class="chart-label" x="${left}" y="${height - 8}">${escapeHtml(firstTime)}</text>
+    <text class="chart-label" x="${width - right}" y="${height - 8}"
+      text-anchor="end">${escapeHtml(lastTime)}</text>
+  </svg>`;
+
+  const legend = series.map(item => `
+    <span>
+      <i class="legend-dot" style="background:${item.color}"></i>
+      ${escapeHtml(item.name)}
+    </span>
+  `).join("");
+
+  container.innerHTML = svg + `<div class="chart-legend">${legend}</div>`;
+}
+
+
+async function loadHistory() {
+  const deviceId = document.getElementById("historyDevice").value;
+  const minutes = Number(document.getElementById("historyMinutes").value);
+  const summary = document.getElementById("historySummary");
+  const refreshButton = document.getElementById("refreshHistory");
+
+  refreshButton.disabled = true;
+  summary.textContent = "Loading stored telemetry…";
+
+  try {
+    const url = `/api/history?device_id=${encodeURIComponent(deviceId)}&minutes=${minutes}`;
+    const response = await fetch(url);
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.detail || "Could not load history");
+    }
+
+    const records = result.readings;
+
+    drawLineChart("fpsChart", records, [
+      {
+        name: "Actual FPS",
+        values: records.map(row => row.fps),
+        color: "#6be5b5"
+      },
+      {
+        name: "Target FPS",
+        values: records.map(row => row.target_fps),
+        color: "#7ca8ff"
+      }
+    ]);
+
+    drawLineChart("temperatureChart", records, [
+      {
+        name: "Temperature (°C)",
+        values: records.map(row => row.temperature_c),
+        color: "#ffbe69"
+      }
+    ]);
+
+    summary.textContent =
+      `${result.count} stored readings for ${deviceId}. ` +
+      `Range: last ${minutes} minute(s).`;
+  } catch (error) {
+    summary.textContent = `History error: ${error.message}`;
+    document.getElementById("fpsChart").innerHTML = "";
+    document.getElementById("temperatureChart").innerHTML = "";
+  } finally {
+    refreshButton.disabled = false;
+  }
+}
+
+document.getElementById("refreshHistory")
+  .addEventListener("click", loadHistory);
+
+document.getElementById("historyDevice")
+  .addEventListener("change", loadHistory);
+
+document.getElementById("historyMinutes")
+  .addEventListener("change", loadHistory);
 
     function connectWebSocket() {
       clearTimeout(reconnectTimer);
@@ -449,6 +701,7 @@
       .catch(() => {});
 
     connectWebSocket();
+    loadHistory();
   </script>
 </body>
 </html>

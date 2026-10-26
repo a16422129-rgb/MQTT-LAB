@@ -1,4 +1,4 @@
-
+import sqlite3
 import asyncio
 import json
 import time
@@ -23,7 +23,8 @@ TELEMETRY_TIMEOUT_SECONDS = 6
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
-
+DB_PATH = BASE_DIR / "camera_history.db"
+db = None
 # Internal state is held in memory; no database is required for this lab.
 cameras = {
     "camera01": {
@@ -92,6 +93,29 @@ async def broadcast_state():
     for websocket in disconnected:
         websocket_clients.discard(websocket)
 
+def initialize_database():
+    global db
+
+    db = sqlite3.connect(DB_PATH)
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS telemetry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id TEXT NOT NULL,
+            received_at TEXT NOT NULL,
+            received_at_epoch REAL NOT NULL,
+            fps REAL,
+            target_fps INTEGER,
+            temperature_c REAL
+        )
+    """)
+
+    db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_telemetry_device_time
+        ON telemetry (device_id, received_at_epoch)
+    """)
+
+    db.commit()
+    print(f"Telemetry database ready: {DB_PATH}")
 
 async def process_mqtt_message(topic, raw_payload):
     """Run MQTT message processing on FastAPI's asyncio event loop."""
@@ -130,6 +154,26 @@ async def process_mqtt_message(topic, raw_payload):
         camera["last_seen"] = utc_now()
         camera["last_seen_monotonic"] = time.monotonic()
         camera["connection"] = "online"
+        if db is not None:
+            received_at = utc_now()
+            db.execute(
+                """
+                INSERT INTO telemetry (
+                    device_id, received_at, received_at_epoch,
+                    fps, target_fps, temperature_c
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    device_id,
+                    received_at,
+                    time.time(),
+                    payload.get("fps"),
+                    payload.get("target_fps"),
+                    payload.get("temperature_c"),
+                ),
+            )
+            db.commit()
 
     elif message_type == "status":
         status = payload.get("status", "unknown")
@@ -203,6 +247,7 @@ async def lifespan(app: FastAPI):
     global event_loop, mqtt_client
 
     event_loop = asyncio.get_running_loop()
+    initialize_database()
 
     mqtt_client = mqtt.Client(
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -226,6 +271,9 @@ async def lifespan(app: FastAPI):
         if mqtt_client is not None:
             mqtt_client.disconnect()
             mqtt_client.loop_stop()
+            if db is not None:
+                db.close()
+                db = None
 
         event_loop = None
         print("Camera dashboard backend stopped.")
@@ -247,6 +295,51 @@ async def homepage():
 @app.get("/api/cameras")
 async def get_cameras():
     return {"cameras": public_camera_state()}
+
+@app.get("/api/history")
+async def get_history(device_id: str = "camera01", minutes: int = 60):
+    if db is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Telemetry database is not ready",
+        )
+
+    if not device_id or len(device_id) > 100:
+        raise HTTPException(status_code=400, detail="Invalid device ID")
+
+    if not 1 <= minutes <= 10080:
+        raise HTTPException(
+            status_code=400,
+            detail="Minutes must be between 1 and 10080",
+        )
+
+    cutoff = time.time() - minutes * 60
+
+    rows = db.execute(
+        """
+        SELECT received_at, fps, target_fps, temperature_c
+        FROM telemetry
+        WHERE device_id = ? AND received_at_epoch >= ?
+        ORDER BY received_at_epoch ASC
+        LIMIT 10000
+        """,
+        (device_id, cutoff),
+    ).fetchall()
+
+    return {
+        "device_id": device_id,
+        "minutes": minutes,
+        "count": len(rows),
+        "readings": [
+            {
+                "timestamp": row[0],
+                "fps": row[1],
+                "target_fps": row[2],
+                "temperature_c": row[3],
+            }
+            for row in rows
+        ],
+    }
 
 
 @app.post("/api/cameras/{device_id}/fps")
