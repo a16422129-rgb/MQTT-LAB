@@ -2,3 +2,4 @@
 security/passwordfile
 __pycache__/
 *.py[cod]
+1.txt
