@@ -1,31 +1,17 @@
 
 import json
-import os
 import sys
 import uuid
 import threading
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
-from dotenv import load_dotenv
 
-BROKER = "127.0.0.1"
-PORT = 1883
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-
-
-def get_dashboard_credentials():
-    """The command publisher uses the dashboard role, which may write commands."""
-    username = os.getenv("MQTT_DASHBOARD_USERNAME")
-    password = os.getenv("MQTT_DASHBOARD_PASSWORD")
-    if not username or not password:
-        raise RuntimeError(
-            "Missing dashboard MQTT credentials. Set MQTT_DASHBOARD_USERNAME and "
-            "MQTT_DASHBOARD_PASSWORD in the root .env file."
-        )
-
-    return username, password
+from mqtt_config import BROKER_HOST, BROKER_PORT, configure_tls, get_role_credentials
 
 
 def main():
@@ -66,11 +52,12 @@ def main():
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         client_id=f"command-sender-{uuid.uuid4().hex[:8]}",
     )
-    client.username_pw_set(*get_dashboard_credentials())
+    client.username_pw_set(*get_role_credentials("dashboard"))
+    configure_tls(client)
     client.on_connect = on_connect
 
     try:
-        client.connect(BROKER, PORT, keepalive=60)
+        client.connect(BROKER_HOST, BROKER_PORT, keepalive=60)
         client.loop_start()
 
         if not connected.wait(timeout=5):

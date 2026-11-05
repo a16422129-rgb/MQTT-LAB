@@ -10,12 +10,12 @@ A local IoT lab built with Python, Mosquitto, MQTT, FastAPI, and WebSockets. Sim
 - Online/offline status, Last Will and Testament (LWT), and stale-device detection
 - Remote target-FPS commands with device responses
 - MQTT QoS 1 and retained status messages
-- Per-client MQTT username/password authentication (no TLS in this stage)
+- Per-client MQTT username/password authentication over verified TLS
 
 ## Requirements
 
 - Python 3.10+
-- Mosquitto running locally on `127.0.0.1:1883`
+- Mosquitto TLS listener running locally on `127.0.0.1:8883`
 - A Mosquitto configuration that disables anonymous connections and uses the
   password and ACL files described below
 
@@ -38,6 +38,21 @@ required credentials are absent.
 ```powershell
 Copy-Item .env.example .env
 ```
+
+The MQTT clients require TLS. Keep these connection values in `.env` (the CA
+path is resolved relative to the project root, so commands work from another
+working directory):
+
+```ini
+MQTT_BROKER_HOST=127.0.0.1
+MQTT_BROKER_PORT=8883
+MQTT_USE_TLS=true
+MQTT_TLS_CA_CERT=security/tls/ca.crt
+```
+
+The client calls Paho `tls_set()` with this CA certificate and
+`CERT_REQUIRED`; certificate and hostname verification remain enabled. Port
+1883 is not used by this application.
 
 The four accounts are `camera01`, `camera02`, `dashboard`, and `monitor`.
 Each simulator uses its matching camera account; the web dashboard uses
@@ -118,9 +133,9 @@ After an administrator has enabled the Mosquitto configuration above and each
 `.env` value matches its password-file account:
 
 1. Run the monitor, both cameras, and the dashboard as shown above. Each should
-   print its normal connection message. A missing `.env` value instead produces
-   a local configuration error without revealing a password; a wrong password
-   produces the client's MQTT connection-failed message.
+   print its normal connection message. A missing `.env` value or CA file
+   produces a local configuration error without revealing a password; a wrong
+   password produces the client's MQTT connection-failed message.
 2. Check that both camera telemetry streams appear in the monitor and browser.
    Attempting to publish to a camera topic owned by the other camera with that
    camera's credentials must be denied by Mosquitto.
@@ -141,6 +156,6 @@ intentionally read-only.
 ## Notes
 
 - This is a local learning project, not a production-secured deployment.
-- TLS is intentionally not configured in this stage.
+- TLS certificate verification is required; do not set `MQTT_USE_TLS=false`.
 - Camera state is kept in memory and resets when the web backend restarts.
 - QoS 1 may deliver duplicate messages; consumers should be designed accordingly.

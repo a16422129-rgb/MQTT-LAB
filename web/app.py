@@ -1,7 +1,7 @@
 import sqlite3
 import asyncio
 import json
-import os
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
-from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -19,15 +18,16 @@ from pydantic import BaseModel, Field
 
 # ---------------- Configuration ----------------
 
-BROKER = "127.0.0.1"
-PORT = 1883
 TELEMETRY_TIMEOUT_SECONDS = 6
 
 BASE_DIR = Path(__file__).resolve().parent
-PROJECT_DIR = BASE_DIR.parent
+PROJECT_ROOT = BASE_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 STATIC_DIR = BASE_DIR / "static"
 DB_PATH = BASE_DIR / "camera_history.db"
-load_dotenv(PROJECT_DIR / ".env")
+from mqtt_config import BROKER_HOST, BROKER_PORT, configure_tls, get_role_credentials
 db = None
 # Internal state is held in memory; no database is required for this lab.
 cameras = {
@@ -56,18 +56,6 @@ cameras = {
 websocket_clients: set[WebSocket] = set()
 event_loop = None
 mqtt_client = None
-
-
-def get_dashboard_credentials():
-    username = os.getenv("MQTT_DASHBOARD_USERNAME")
-    password = os.getenv("MQTT_DASHBOARD_PASSWORD")
-    if not username or not password:
-        raise RuntimeError(
-            "Missing dashboard MQTT credentials. Set MQTT_DASHBOARD_USERNAME and "
-            "MQTT_DASHBOARD_PASSWORD in the root .env file."
-        )
-
-    return username, password
 
 
 def utc_now():
@@ -221,7 +209,7 @@ def on_mqtt_connect(client, userdata, flags, reason_code, properties):
         print(f"MQTT connection failed: {reason_code}")
         return
 
-    print(f"Connected to MQTT broker at {BROKER}:{PORT}")
+    print(f"Connected to MQTT broker at {BROKER_HOST}:{BROKER_PORT} with TLS")
     client.subscribe("camera/+/telemetry", qos=1)
     client.subscribe("camera/+/status", qos=1)
     client.subscribe("camera/+/response", qos=1)
@@ -269,11 +257,12 @@ async def lifespan(app: FastAPI):
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         client_id=f"camera-web-dashboard-{uuid.uuid4().hex[:8]}",
     )
-    mqtt_client.username_pw_set(*get_dashboard_credentials())
+    mqtt_client.username_pw_set(*get_role_credentials("dashboard"))
+    configure_tls(mqtt_client)
     mqtt_client.on_connect = on_mqtt_connect
     mqtt_client.on_message = on_mqtt_message
 
-    mqtt_client.connect(BROKER, PORT, keepalive=30)
+    mqtt_client.connect(BROKER_HOST, BROKER_PORT, keepalive=30)
     mqtt_client.loop_start()
 
     stale_task = asyncio.create_task(check_stale_cameras())

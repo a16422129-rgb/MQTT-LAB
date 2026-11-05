@@ -1,5 +1,4 @@
 import json
-import os
 import random
 import sys
 import time
@@ -8,38 +7,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
-from dotenv import load_dotenv
 
-BROKER = "127.0.0.1"
-PORT = 1883
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from mqtt_config import BROKER_HOST, BROKER_PORT, configure_tls, get_role_credentials
 
 DEVICE_ID = sys.argv[1] if len(sys.argv) > 1 else "camera01"
 
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-
-CAMERA_CREDENTIAL_ENVIRONMENTS = {
-    "camera01": ("MQTT_CAMERA01_USERNAME", "MQTT_CAMERA01_PASSWORD"),
-    "camera02": ("MQTT_CAMERA02_USERNAME", "MQTT_CAMERA02_PASSWORD"),
-}
-
 
 def get_camera_credentials(device_id):
-    try:
-        username_key, password_key = CAMERA_CREDENTIAL_ENVIRONMENTS[device_id]
-    except KeyError as error:
+    if device_id not in {"camera01", "camera02"}:
         raise ValueError(
             "Device ID must be camera01 or camera02 when authentication is enabled."
-        ) from error
-
-    username = os.getenv(username_key)
-    password = os.getenv(password_key)
-    if not username or not password:
-        raise RuntimeError(
-            f"Missing MQTT credentials for {device_id}. "
-            f"Set {username_key} and {password_key} in the root .env file."
         )
 
-    return username, password
+    return get_role_credentials(device_id)
 
 TELEMETRY_TOPIC = f"camera/{DEVICE_ID}/telemetry"
 STATUS_TOPIC = f"camera/{DEVICE_ID}/status"
@@ -126,6 +110,7 @@ client = mqtt.Client(
     client_id=f"{DEVICE_ID}-simulator",
 )
 client.username_pw_set(*get_camera_credentials(DEVICE_ID))
+configure_tls(client)
 
 client.on_connect = on_connect
 client.on_message = on_message
@@ -141,7 +126,7 @@ client.will_set(
     retain=True,
 )
 
-client.connect(BROKER, PORT, keepalive=10)
+client.connect(BROKER_HOST, BROKER_PORT, keepalive=10)
 client.loop_start()
 
 try:

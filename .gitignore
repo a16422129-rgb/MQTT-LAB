@@ -3,3 +3,6 @@ security/passwordfile
 __pycache__/
 *.py[cod]
 1.txt
+security/tls/*.key
+security/tls/*.csr
+security/tls/*.srl
