@@ -12,7 +12,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from mqtt_config import BROKER_HOST, BROKER_PORT, configure_tls, get_role_credentials
+from mqtt_config import (
+    BROKER_HOST,
+    BROKER_PORT,
+    configure_reconnect,
+    configure_tls,
+    get_role_credentials,
+)
 
 DEVICE_ID = sys.argv[1] if len(sys.argv) > 1 else "camera01"
 
@@ -45,22 +51,70 @@ def publish_response(client, command_id, success, message):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    client.publish(
+    info = client.publish(
         RESPONSE_TOPIC,
         json.dumps(response),
         qos=1,
         retain=False,
     )
+    if info.rc != mqtt.MQTT_ERR_SUCCESS:
+        print(
+            f"[{DEVICE_ID}] Warning: Failed to publish command response: "
+            f"{mqtt.error_string(info.rc)}"
+        )
+
+
+def publish_status(client, status, reason=None):
+    """Publish camera online/offline status with QoS 1 and retain flag."""
+    payload = {
+        "device_id": DEVICE_ID,
+        "status": status,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if reason:
+        payload["reason"] = reason
+
+    info = client.publish(
+        STATUS_TOPIC,
+        json.dumps(payload),
+        qos=1,
+        retain=True,
+    )
+    if info.rc != mqtt.MQTT_ERR_SUCCESS:
+        print(
+            f"[{DEVICE_ID}] Warning: Failed to publish {status} status: "
+            f"{mqtt.error_string(info.rc)}"
+        )
+    else:
+        print(f"[{DEVICE_ID}] Status published: {status}")
+    return info
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code.is_failure:
-        print("MQTT connection failed:", reason_code)
+        print(f"[{DEVICE_ID}] MQTT connection failed: {reason_code}")
         return
 
-    print(f"{DEVICE_ID} connected to broker.")
+    print(
+        f"[{DEVICE_ID}] Connected to MQTT broker at {BROKER_HOST}:{BROKER_PORT} "
+        f"(session present: {flags.session_present})."
+    )
     client.subscribe(COMMAND_TOPIC, qos=1)
-    print(f"Listening for commands on: {COMMAND_TOPIC}")
+    print(f"[{DEVICE_ID}] Listening for commands on: {COMMAND_TOPIC}")
+
+    # Ensure the camera publishes its online status only after a successful connection.
+    # When reconnecting after a broker restart or network blip, this re-announces online state.
+    publish_status(client, "online")
+
+
+def on_disconnect(client, userdata, disconnect_flags, reason_code, properties):
+    if reason_code.is_failure:
+        print(
+            f"[{DEVICE_ID}] Disconnected from MQTT broker unexpectedly ({reason_code}). "
+            "Paho will attempt automatic reconnection..."
+        )
+    else:
+        print(f"[{DEVICE_ID}] Disconnected from MQTT broker cleanly.")
 
 
 def on_message(client, userdata, message):
@@ -111,8 +165,10 @@ client = mqtt.Client(
 )
 client.username_pw_set(*get_camera_credentials(DEVICE_ID))
 configure_tls(client)
+configure_reconnect(client)
 
 client.on_connect = on_connect
+client.on_disconnect = on_disconnect
 client.on_message = on_message
 
 client.will_set(
@@ -126,24 +182,14 @@ client.will_set(
     retain=True,
 )
 
-client.connect(BROKER_HOST, BROKER_PORT, keepalive=10)
+try:
+    client.connect_async(BROKER_HOST, BROKER_PORT, keepalive=10)
+except Exception as error:
+    print(f"[{DEVICE_ID}] Initial connection attempt error: {error}")
+
 client.loop_start()
 
 try:
-    # Wait for the MQTT connection and command subscription to settle.
-    time.sleep(1)
-
-    client.publish(
-        STATUS_TOPIC,
-        json.dumps({
-            "device_id": DEVICE_ID,
-            "status": "online",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }),
-        qos=1,
-        retain=True,
-    )
-
     print(f"\n{DEVICE_ID} simulator is running.")
     print("Press Ctrl+C to stop.\n")
 
@@ -162,36 +208,41 @@ try:
             "status": "online",
         }
 
-        client.publish(
-            TELEMETRY_TOPIC,
-            json.dumps(telemetry),
-            qos=1,
-            retain=False,
-        )
-
-        print(
-            f"Telemetry: target FPS={fps}, "
-            f"actual FPS={actual_fps}, "
-            f"temperature={temperature_c:.1f} C"
-        )
+        if client.is_connected():
+            info = client.publish(
+                TELEMETRY_TOPIC,
+                json.dumps(telemetry),
+                qos=1,
+                retain=False,
+            )
+            if info.rc != mqtt.MQTT_ERR_SUCCESS:
+                print(
+                    f"[{DEVICE_ID}] Failed to publish telemetry: "
+                    f"{mqtt.error_string(info.rc)}"
+                )
+            else:
+                print(
+                    f"Telemetry: target FPS={fps}, "
+                    f"actual FPS={actual_fps}, "
+                    f"temperature={temperature_c:.1f} C"
+                )
+        else:
+            print(f"[{DEVICE_ID}] Waiting for MQTT connection before publishing telemetry...")
 
         time.sleep(2)
 
 except KeyboardInterrupt:
     print(f"\nStopping {DEVICE_ID}...")
 
-    info = client.publish(
-        STATUS_TOPIC,
-        json.dumps({
-            "device_id": DEVICE_ID,
-            "status": "offline",
-            "reason": "graceful_shutdown",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }),
-        qos=1,
-        retain=True,
-    )
-    info.wait_for_publish(timeout=3)
+    if client.is_connected():
+        try:
+            info = publish_status(client, "offline", reason="graceful_shutdown")
+            info.wait_for_publish(timeout=3)
+            print(f"[{DEVICE_ID}] Graceful offline status delivered.")
+        except Exception as error:
+            print(f"[{DEVICE_ID}] Failed to deliver graceful offline status: {error}")
+    else:
+        print(f"[{DEVICE_ID}] Client not connected; skipping offline status publish.")
 
 finally:
     client.disconnect()

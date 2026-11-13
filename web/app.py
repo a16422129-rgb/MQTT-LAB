@@ -27,7 +27,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 STATIC_DIR = BASE_DIR / "static"
 DB_PATH = BASE_DIR / "camera_history.db"
-from mqtt_config import BROKER_HOST, BROKER_PORT, configure_tls, get_role_credentials
+from mqtt_config import (
+    BROKER_HOST,
+    BROKER_PORT,
+    configure_reconnect,
+    configure_tls,
+    get_role_credentials,
+)
 db = None
 # Internal state is held in memory; no database is required for this lab.
 cameras = {
@@ -209,10 +215,25 @@ def on_mqtt_connect(client, userdata, flags, reason_code, properties):
         print(f"MQTT connection failed: {reason_code}")
         return
 
-    print(f"Connected to MQTT broker at {BROKER_HOST}:{BROKER_PORT} with TLS")
+    print(
+        f"Connected to MQTT broker at {BROKER_HOST}:{BROKER_PORT} with TLS "
+        f"(session present: {flags.session_present})"
+    )
+    # Restore subscriptions on initial connect and every automatic reconnection
     client.subscribe("camera/+/telemetry", qos=1)
     client.subscribe("camera/+/status", qos=1)
     client.subscribe("camera/+/response", qos=1)
+    print("Dashboard subscriptions restored: telemetry, status, response")
+
+
+def on_mqtt_disconnect(client, userdata, disconnect_flags, reason_code, properties):
+    if reason_code.is_failure:
+        print(
+            f"Dashboard disconnected from MQTT broker unexpectedly ({reason_code}). "
+            "Paho will attempt automatic reconnection..."
+        )
+    else:
+        print("Dashboard disconnected from MQTT broker cleanly.")
 
 
 def on_mqtt_message(client, userdata, message):
@@ -248,7 +269,7 @@ async def check_stale_cameras():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global event_loop, mqtt_client
+    global event_loop, mqtt_client, db
 
     event_loop = asyncio.get_running_loop()
     initialize_database()
@@ -259,10 +280,16 @@ async def lifespan(app: FastAPI):
     )
     mqtt_client.username_pw_set(*get_role_credentials("dashboard"))
     configure_tls(mqtt_client)
+    configure_reconnect(mqtt_client)
     mqtt_client.on_connect = on_mqtt_connect
+    mqtt_client.on_disconnect = on_mqtt_disconnect
     mqtt_client.on_message = on_mqtt_message
 
-    mqtt_client.connect(BROKER_HOST, BROKER_PORT, keepalive=30)
+    try:
+        mqtt_client.connect_async(BROKER_HOST, BROKER_PORT, keepalive=30)
+    except Exception as error:
+        print(f"Warning: Initial dashboard MQTT connection setup failed: {error}")
+
     mqtt_client.loop_start()
 
     stale_task = asyncio.create_task(check_stale_cameras())
@@ -373,7 +400,24 @@ async def set_camera_fps(device_id: str, command: FPSCommand):
     )
 
     if result.rc != mqtt.MQTT_ERR_SUCCESS:
-        raise HTTPException(status_code=503, detail="Could not publish MQTT command")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not publish MQTT command: {mqtt.error_string(result.rc)}",
+        )
+
+    try:
+        await asyncio.to_thread(result.wait_for_publish, timeout=5.0)
+    except (RuntimeError, ValueError) as error:
+        raise HTTPException(
+            status_code=503,
+            detail=f"MQTT publish failed: {error}",
+        )
+
+    if not result.is_published():
+        raise HTTPException(
+            status_code=504,
+            detail="Timed out waiting for MQTT broker to acknowledge command",
+        )
 
     return {
         "published": True,

@@ -91,3 +91,17 @@ def configure_tls(client):
     # Paho's tls_set() uses a PROTOCOL_TLS_CLIENT context on supported Python
     # versions. CERT_REQUIRED and the default hostname checks remain enabled.
     client.tls_set(ca_certs=str(TLS_CA_CERT), cert_reqs=ssl.CERT_REQUIRED)
+
+
+DEFAULT_RECONNECT_MIN_DELAY = 1
+DEFAULT_RECONNECT_MAX_DELAY = 60
+
+
+def configure_reconnect(
+    client,
+    min_delay=DEFAULT_RECONNECT_MIN_DELAY,
+    max_delay=DEFAULT_RECONNECT_MAX_DELAY,
+):
+    """Configure automatic exponential reconnection backoff delays."""
+    client.reconnect_delay_set(min_delay=min_delay, max_delay=max_delay)
+
